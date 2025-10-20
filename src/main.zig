@@ -3,9 +3,13 @@ const Chip8 = @import("Chip8.zig");
 
 pub fn main() !void {
     var chip8 = Chip8.init();
+    std.debug.print("{d}\n", .{chip8.randByte()});
 
-    chip8.loadRom("PONG.ch8") catch |err| {
-        std.debug.print("Failed to load ROM: {}\n", .{err});
+    chip8.loadRom("./chip8/roms/games/Cave.ch8") catch |err| {
+        switch (err) {
+            error.RomTooBig => std.debug.print("ROM file is too big to fit in memory.\n", .{}),
+            else => return err,
+        }
         return;
     };
 }
