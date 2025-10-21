@@ -11,7 +11,7 @@ stack: [16]u16 = @splat(0),
 sp: u8 = 0,
 delay_timer: u8 = 0,
 sound_timer: u8 = 0,
-keypad: [16]u8 = @splat(0),
+keypad: [16]u8 = undefined,
 display: [64 * 32]bool = @splat(false),
 VIDEO_WIDTH: u8 = 64,
 VIDEO_HEIGHT: u8 = 32,
@@ -50,6 +50,14 @@ pub fn init() Chip8 {
     // load fontset into memory
     std.mem.copyForwards(u8, chip8.memory[0x50 .. 0x50 + fontset.len], &fontset);
 
+    // set the keypad values
+    chip8.keypad = .{
+        0x1, 0x2, 0x3, 0xC,
+        0x4, 0x5, 0x6, 0xD,
+        0x7, 0x8, 0x9, 0xE,
+        0xA, 0x0, 0xB, 0xF,
+    };
+
     return chip8;
 }
 
@@ -67,7 +75,7 @@ pub fn loadRom(self: *Chip8, file_name: []const u8) !void {
         return error.RomTooBig;
     }
 
-    _ = try reader.readSliceShort(self.memory[512..]);
+    _ = try reader.readSliceShort(self.memory[0x200..]);
 }
 
 /// generate a random u8 integer
@@ -288,9 +296,78 @@ fn DRW_Vx_Vy_n(self: *Chip8) void {
     }
 }
 
+// /// Ex9E -> SKP Vx: skip next instruction if key with value of Vx is pressed
+// fn SKP_Vx(self: *Chip8) void {
+//     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+//     const key = self.registers[Vx];
+// }
+
 // ============================================
 // below are the test functions for the methods
 // ============================================
+
+test "initialize" {
+    var chip8 = Chip8.init();
+
+    const fontset: [80]u8 = .{
+        0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+        0x20, 0x60, 0x20, 0x20, 0x70, // 1
+        0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+        0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+        0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+        0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+        0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+        0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+        0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+        0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+        0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+        0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+        0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+        0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+        0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+        0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+    };
+
+    // test if fontset is loaded into memory correctly
+    try std.testing.expectEqualSlices(u8, &fontset, chip8.memory[0x50 .. 0x50 + fontset.len]);
+
+    const keypad: [16]u8 = .{
+        0x1, 0x2, 0x3, 0xC,
+        0x4, 0x5, 0x6, 0xD,
+        0x7, 0x8, 0x9, 0xE,
+        0xA, 0x0, 0xB, 0xF,
+    };
+
+    // test if keypad is initialized correctly
+    try std.testing.expectEqualSlices(u8, &keypad, &chip8.keypad);
+}
+
+test "load rom" {
+    var chip8 = Chip8.init();
+
+    // create a dummy rom file
+    const rom_data: [10]u8 = .{ 0x00, 0xE0, 0xA2, 0x2A, 0x60, 0x0C, 0x61, 0x08, 0xD0, 0x18 };
+    const rom_file_name = "test_rom.ch8";
+
+    var rom_file = try std.fs.cwd().createFile(rom_file_name, .{ .truncate = true });
+    defer rom_file.close();
+    defer std.fs.cwd().deleteFile(rom_file_name) catch |err| {
+        std.debug.print("Failed to remove {s}: {any}\n", .{ rom_file_name, err });
+    };
+
+    var buffer: [10]u8 = undefined;
+    var file_writer = rom_file.writer(&buffer);
+    const writer = &file_writer.interface;
+
+    try writer.writeAll(&rom_data);
+    try writer.flush();
+
+    // load the rom into chip8 memory
+    try chip8.loadRom(rom_file_name);
+
+    // check if the rom data is loaded correctly into memory starting at 0x200
+    try std.testing.expectEqualSlices(u8, &rom_data, chip8.memory[0x200 .. 0x200 + rom_data.len]);
+}
 
 test "clear display" {
     var chip8 = Chip8.init();
@@ -744,55 +821,6 @@ test "jump to address + V0" {
 
     try std.testing.expectEqual(0x87 + 0x34F, chip8.pc);
 }
-
-// /// Dxyn -> DRW Vx, Vy, nibble
-// /// display n-byte sprite from memory location I at (Vx, Vy), set VF = collision
-// fn DRW_Vx_Vy_n(self: *Chip8) void {
-//     const Vx: u8 = (self.opcode & 0x0F00) >> 8;
-//     const Vy: u8 = (self.opcode & 0x00F0) >> 4;
-//     const height: u8 = self.opcode & 0x000F;
-//     const width: u8 = 8;
-//
-//     // wrap if beyond screen boundaries
-//     const x_pos = self.registers[Vx] % self.VIDEO_WIDTH;
-//     const y_pos = self.registers[Vy] % self.VIDEO_HEIGHT;
-//
-//     self.registers[0xF] = 0;
-//
-//     for (0..height) |row| {
-//         const sprite_byte = self.memory[self.index + row];
-//         const current = self.display[(y_pos * self.VIDEO_WIDTH) + x_pos .. x_pos + width];
-//
-//         for (0..width) |col| {
-//             const sprite_pixel = (sprite_byte & (0x80 >> col)) != 0;
-//             const display_pixel = &current[col];
-//
-//             // if both pixels are on there is a collision
-//             self.registers[0xF] = sprite_pixel and display_pixel;
-//             // xor display pixel with sprite pixel
-//             display_pixel = !(display_pixel and true) and (display_pixel or true);
-//         }
-//     }
-// }
-
-// const fontset: [80]u8 = .{
-//     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-//     0x20, 0x60, 0x20, 0x20, 0x70, // 1
-//     0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-//     0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-//     0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-//     0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-//     0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-//     0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-//     0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-//     0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-//     0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-//     0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-//     0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-//     0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-//     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-//     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-// };
 
 test "drawing to display" {
     var chip8 = Chip8.init();
