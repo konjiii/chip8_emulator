@@ -11,12 +11,13 @@ stack: [16]u16 = @splat(0),
 sp: u8 = 0,
 delay_timer: u8 = 0,
 sound_timer: u8 = 0,
-keypad: [16]u8 = undefined,
+keypad: [16]bool = @splat(false),
 display: [64 * 32]bool = @splat(false),
-VIDEO_WIDTH: u8 = 64,
-VIDEO_HEIGHT: u8 = 32,
 opcode: u16 = 0,
 rand: std.Random = undefined,
+VIDEO_WIDTH: u8 = 64,
+VIDEO_HEIGHT: u8 = 32,
+FONTSET_START_ADDR: u16 = 0x50,
 
 pub fn init() Chip8 {
     // generate random seed
@@ -47,16 +48,11 @@ pub fn init() Chip8 {
         0xF0, 0x80, 0xF0, 0x80, 0x80, // F
     };
 
+    // start and end address of fontset in memory
+    const start = chip8.FONTSET_START_ADDR;
+    const end = chip8.FONTSET_START_ADDR + fontset.len;
     // load fontset into memory
-    std.mem.copyForwards(u8, chip8.memory[0x50 .. 0x50 + fontset.len], &fontset);
-
-    // set the keypad values
-    chip8.keypad = .{
-        0x1, 0x2, 0x3, 0xC,
-        0x4, 0x5, 0x6, 0xD,
-        0x7, 0x8, 0x9, 0xE,
-        0xA, 0x0, 0xB, 0xF,
-    };
+    std.mem.copyForwards(u8, chip8.memory[start..end], &fontset);
 
     return chip8;
 }
@@ -296,11 +292,109 @@ fn DRW_Vx_Vy_n(self: *Chip8) void {
     }
 }
 
-// /// Ex9E -> SKP Vx: skip next instruction if key with value of Vx is pressed
-// fn SKP_Vx(self: *Chip8) void {
-//     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
-//     const key = self.registers[Vx];
-// }
+/// Ex9E -> SKP Vx: skip next instruction if key is pressed
+fn SKP_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    const key = self.registers[Vx];
+
+    if (self.keypad[key]) {
+        self.pc += 2;
+    }
+}
+
+/// ExA1 -> SKNP Vx: skip next instruction if key is not pressed
+fn SKNP_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    const key = self.registers[Vx];
+
+    if (!self.keypad[key]) {
+        self.pc += 2;
+    }
+}
+
+/// Fx07 -> LD Vx, DT: set Vx = delay timer value
+fn LD_Vx_DT(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    self.registers[Vx] = self.delay_timer;
+}
+
+/// Fx0A -> LD Vx, K: wait for key press and store value of key in Vx
+/// when no key is pressed the program waits by not moving the program counter
+/// (self.pc -= 2)
+fn LD_Vx_K(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+
+    for (0..16) |key| {
+        if (self.keypad[key]) {
+            self.registers[Vx] = @intCast(key);
+            return;
+        }
+    }
+
+    // no key pressed, repeat this instruction
+    self.pc -= 2;
+}
+
+/// Fx15 -> LD DT, Vx: set delay timer = Vx
+fn LD_DT_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    self.delay_timer = self.registers[Vx];
+}
+
+/// Fx18 -> LD ST, Vx: set sound timer = Vx
+fn LD_ST_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    self.sound_timer = self.registers[Vx];
+}
+
+/// Fx1E -> ADD I, Vx: set I = I + Vx
+fn ADD_I_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    self.index += @intCast(self.registers[Vx]);
+}
+
+/// Fx29 -> LD F, Vx: set I = location of sprite for digit at register Vx
+fn LD_F_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+    // every digit is 5 bytes long
+    self.index = self.FONTSET_START_ADDR + (self.registers[Vx] * 5);
+}
+
+/// Fx33 -> LD B, Vx: store BCD representation of Vx in memory locations I,
+/// I+1, and I+2
+/// Interpreter takes decimal value of Vx, and places hundreds digit in memory
+/// at location in I, tens digit at I+1, and ones digit at I+2
+fn LD_B_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+
+    var value = self.registers[Vx];
+    self.memory[self.index + 2] = value % 10;
+
+    value /= 10;
+    self.memory[self.index + 1] = value % 10;
+
+    value /= 10;
+    self.memory[self.index] = value;
+}
+
+/// Fx55 -> LD [I], Vx: store registers V0 through Vx in memory starting at
+/// location I
+fn LD_I_Vx(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+
+    const start = self.index;
+    const end = self.index + Vx + 1;
+    std.mem.copyForwards(u8, self.memory[start..end], self.registers[0 .. Vx + 1]);
+}
+
+/// Fx65 -> LD Vx, [I]: read registers V0 through Vx from memory starting at
+fn LD_Vx_I(self: *Chip8) void {
+    const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
+
+    const start = self.index;
+    const end = self.index + Vx + 1;
+    std.mem.copyForwards(u8, self.registers[0 .. Vx + 1], self.memory[start..end]);
+}
 
 // ============================================
 // below are the test functions for the methods
@@ -330,16 +424,6 @@ test "initialize" {
 
     // test if fontset is loaded into memory correctly
     try std.testing.expectEqualSlices(u8, &fontset, chip8.memory[0x50 .. 0x50 + fontset.len]);
-
-    const keypad: [16]u8 = .{
-        0x1, 0x2, 0x3, 0xC,
-        0x4, 0x5, 0x6, 0xD,
-        0x7, 0x8, 0x9, 0xE,
-        0xA, 0x0, 0xB, 0xF,
-    };
-
-    // test if keypad is initialized correctly
-    try std.testing.expectEqualSlices(u8, &keypad, &chip8.keypad);
 }
 
 test "load rom" {
@@ -886,4 +970,192 @@ test "drawing to display" {
     first = 7 * 64 + 2;
     try std.testing.expectEqualSlices(bool, &ExorF[4], chip8.display[first .. first + 8]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
+}
+
+test "skip if key pressed" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x1] = 0x5;
+    chip8.keypad[0x5] = true;
+    chip8.opcode = 0xE19E;
+
+    chip8.SKP_Vx();
+
+    try std.testing.expectEqual(0x200 + 2, chip8.pc);
+
+    chip8.registers[0x2] = 0xA;
+    chip8.opcode = 0xE29E;
+
+    chip8.SKP_Vx();
+
+    try std.testing.expectEqual(0x200 + 2, chip8.pc);
+}
+
+test "skip if key not pressed" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x1] = 0x5;
+    chip8.keypad[0x5] = false;
+    chip8.opcode = 0xE1A1;
+
+    chip8.SKNP_Vx();
+
+    try std.testing.expectEqual(0x200 + 2, chip8.pc);
+
+    chip8.registers[0x2] = 0xA;
+    chip8.keypad[0xA] = true;
+    chip8.opcode = 0xE2A1;
+
+    chip8.SKNP_Vx();
+
+    try std.testing.expectEqual(0x200 + 2, chip8.pc);
+}
+
+test "set Vx = delay timer" {
+    var chip8 = Chip8.init();
+
+    chip8.delay_timer = 55;
+    chip8.opcode = 0xF107;
+
+    chip8.LD_Vx_DT();
+
+    try std.testing.expectEqual(55, chip8.registers[0x1]);
+}
+
+test "wait for key press and store in Vx" {
+    var chip8 = Chip8.init();
+
+    chip8.opcode = 0xF30A;
+    chip8.pc += 2;
+
+    // no key pressed, pc should remain the same after calling LD_Vx_K
+    chip8.LD_Vx_K();
+    try std.testing.expectEqual(0x0, chip8.registers[0x3]);
+    try std.testing.expectEqual(0x200, chip8.pc);
+
+    // simulate key press
+    chip8.keypad[0x7] = true;
+    chip8.pc += 2;
+
+    chip8.LD_Vx_K();
+    try std.testing.expectEqual(0x7, chip8.registers[0x3]);
+    try std.testing.expectEqual(0x200 + 2, chip8.pc);
+}
+
+test "set delay timer = Vx" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x4] = 120;
+    chip8.opcode = 0xF415;
+
+    chip8.LD_DT_Vx();
+
+    try std.testing.expectEqual(120, chip8.delay_timer);
+}
+
+test "set sound timer = Vx" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x9] = 200;
+    chip8.opcode = 0xF918;
+
+    chip8.LD_ST_Vx();
+
+    try std.testing.expectEqual(200, chip8.sound_timer);
+}
+
+test "add Vx to I" {
+    var chip8 = Chip8.init();
+
+    chip8.index = 0x300;
+    chip8.registers[0x2] = 0x50;
+    chip8.opcode = 0xF21E;
+
+    chip8.ADD_I_Vx();
+
+    try std.testing.expectEqual(0x350, chip8.index);
+}
+
+test "set I to location of sprite for digit in Vx" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x3] = 0xA; // digit A
+    chip8.opcode = 0xF329;
+
+    chip8.LD_F_Vx();
+
+    try std.testing.expectEqual(chip8.FONTSET_START_ADDR + (0xA * 5), chip8.index);
+
+    chip8.registers[0x7] = 0x4; // digit 4
+    chip8.opcode = 0xF729;
+
+    chip8.LD_F_Vx();
+
+    try std.testing.expectEqual(chip8.FONTSET_START_ADDR + (0x4 * 5), chip8.index);
+}
+
+test "store BCD representation of Vx in memory" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x5] = 234;
+    chip8.index = 0x300;
+    chip8.opcode = 0xF533;
+
+    chip8.LD_B_Vx();
+
+    try std.testing.expectEqual(2, chip8.memory[0x300]);
+    try std.testing.expectEqual(3, chip8.memory[0x301]);
+    try std.testing.expectEqual(4, chip8.memory[0x302]);
+
+    chip8.registers[0xA] = 57;
+    chip8.index = 0x400;
+    chip8.opcode = 0xFA33;
+
+    chip8.LD_B_Vx();
+
+    try std.testing.expectEqual(0, chip8.memory[0x400]);
+    try std.testing.expectEqual(5, chip8.memory[0x401]);
+    try std.testing.expectEqual(7, chip8.memory[0x402]);
+}
+
+test "store registers V0 through Vx in memory starting at I" {
+    var chip8 = Chip8.init();
+
+    chip8.registers[0x0] = 0x12;
+    chip8.registers[0x1] = 0x34;
+    chip8.registers[0x2] = 0x56;
+    chip8.registers[0x3] = 0x78;
+    chip8.registers[0x4] = 0x9A;
+
+    chip8.index = 0x300;
+    chip8.opcode = 0xF455; // store V0 through V4
+
+    chip8.LD_I_Vx();
+
+    try std.testing.expectEqual(0x12, chip8.memory[0x300]);
+    try std.testing.expectEqual(0x34, chip8.memory[0x301]);
+    try std.testing.expectEqual(0x56, chip8.memory[0x302]);
+    try std.testing.expectEqual(0x78, chip8.memory[0x303]);
+    try std.testing.expectEqual(0x9A, chip8.memory[0x304]);
+}
+
+test "read registers V0 through Vx from memory starting at I" {
+    var chip8 = Chip8.init();
+
+    chip8.memory[0x400] = 0xAB;
+    chip8.memory[0x401] = 0xCD;
+    chip8.memory[0x402] = 0xEF;
+    chip8.memory[0x403] = 0x12;
+    chip8.memory[0x404] = 0x34;
+
+    chip8.index = 0x400;
+    chip8.opcode = 0xF465; // read into V0 through V4
+
+    chip8.LD_Vx_I();
+
+    try std.testing.expectEqual(0xAB, chip8.registers[0x0]);
+    try std.testing.expectEqual(0xCD, chip8.registers[0x1]);
+    try std.testing.expectEqual(0xEF, chip8.registers[0x2]);
+    try std.testing.expectEqual(0x12, chip8.registers[0x3]);
+    try std.testing.expectEqual(0x34, chip8.registers[0x4]);
 }
