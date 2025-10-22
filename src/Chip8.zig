@@ -3,6 +3,12 @@ const Chip8 = @This();
 
 const std = @import("std");
 
+const VIDEO_WIDTH: u8 = 64;
+const VIDEO_HEIGHT: u8 = 32;
+const FONTSET_START_ADDR: u16 = 0x50;
+
+const OpFn = *const fn (self: *Chip8) void;
+
 registers: [16]u8 = @splat(0),
 memory: [4096]u8 = @splat(0),
 index: u16 = 0,
@@ -15,9 +21,6 @@ keypad: [16]bool = @splat(false),
 display: [64 * 32]bool = @splat(false),
 opcode: u16 = 0,
 rand: std.Random = undefined,
-VIDEO_WIDTH: u8 = 64,
-VIDEO_HEIGHT: u8 = 32,
-FONTSET_START_ADDR: u16 = 0x50,
 
 pub fn init() Chip8 {
     // generate random seed
@@ -49,8 +52,8 @@ pub fn init() Chip8 {
     };
 
     // start and end address of fontset in memory
-    const start = chip8.FONTSET_START_ADDR;
-    const end = chip8.FONTSET_START_ADDR + fontset.len;
+    const start = FONTSET_START_ADDR;
+    const end = FONTSET_START_ADDR + fontset.len;
     // load fontset into memory
     std.mem.copyForwards(u8, chip8.memory[start..end], &fontset);
 
@@ -79,29 +82,80 @@ fn randByte(self: *const Chip8) u8 {
     return self.rand.int(u8);
 }
 
+// dispatch functions for nested tables
+fn dispatch0(self: *Chip8) void {
+    comptime var table_0: [0xE + 1]OpFn = @splat(Chip8.NOP);
+    table_0[0x0] = Chip8.OP_00E0;
+    table_0[0xE] = Chip8.OP_00EE;
+
+    const last_nibble = self.opcode & 0x000F;
+    table_0[last_nibble](self);
+}
+
+fn dispatch8(self: *Chip8) void {
+    comptime var table_8: [0xE + 1]OpFn = @splat(Chip8.NOP);
+    table_8[0x0] = Chip8.OP_8xy0;
+    table_8[0x1] = Chip8.OP_8xy1;
+    table_8[0x2] = Chip8.OP_8xy2;
+    table_8[0x3] = Chip8.OP_8xy3;
+    table_8[0x4] = Chip8.OP_8xy4;
+    table_8[0x5] = Chip8.OP_8xy5;
+    table_8[0x6] = Chip8.OP_8xy6;
+    table_8[0x7] = Chip8.OP_8xy7;
+    table_8[0xE] = Chip8.OP_8xyE;
+
+    const last_nibble = self.opcode & 0x000F;
+    table_8[last_nibble](self);
+}
+
+fn dispatchE(self: *Chip8) void {
+    comptime var table_E: [0xE + 1]OpFn = @splat(Chip8.NOP);
+    table_E[0x1] = Chip8.OP_ExA1;
+    table_E[0xE] = Chip8.OP_Ex9E;
+
+    const last_nibble = self.opcode & 0x000F;
+    table_E[last_nibble](self);
+}
+
+fn dispatchF(self: *Chip8) void {
+    comptime var table_F: [0x65 + 1]OpFn = @splat(Chip8.NOP);
+    table_F[0x07] = Chip8.OP_Fx07;
+    table_F[0x0A] = Chip8.OP_Fx0A;
+    table_F[0x15] = Chip8.OP_Fx15;
+    table_F[0x18] = Chip8.OP_Fx18;
+    table_F[0x1E] = Chip8.OP_Fx1E;
+    table_F[0x29] = Chip8.OP_Fx29;
+    table_F[0x33] = Chip8.OP_Fx33;
+    table_F[0x55] = Chip8.OP_Fx55;
+    table_F[0x65] = Chip8.OP_Fx65;
+
+    const last_nibble = self.opcode & 0x00FF;
+    table_F[last_nibble](self);
+}
+
 // ====================================
 // below are the 34 opcode instructions
 // ====================================
 
 /// 00E0 -> CLS: clear display
-fn CLS(self: *Chip8) void {
+fn OP_00E0(self: *Chip8) void {
     self.display = @splat(false);
 }
 
 /// 00EE -> RET: return from subroutine
-fn RET(self: *Chip8) void {
+fn OP_00EE(self: *Chip8) void {
     self.sp -= 1;
     self.pc = self.stack[self.sp];
 }
 
 /// 1nnn -> JP addr: jump to location nnn
-fn JP_addr(self: *Chip8) void {
+fn OP_1nnn(self: *Chip8) void {
     const addr: u16 = self.opcode & 0x0FFF;
     self.pc = addr;
 }
 
 /// 2nnn -> CALL addr: call subroutine at nnn
-fn CALL_addr(self: *Chip8) void {
+fn OP_2nnn(self: *Chip8) void {
     const addr: u16 = self.opcode & 0x0FFF;
     self.stack[self.sp] = self.pc;
     self.sp += 1;
@@ -109,7 +163,7 @@ fn CALL_addr(self: *Chip8) void {
 }
 
 /// 3xkk -> SE Vx, byte: skip next instruction if Vx == kk
-fn SE_Vx_byte(self: *Chip8) void {
+fn OP_3xkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const byte: u8 = @intCast(self.opcode & 0x00FF);
 
@@ -119,7 +173,7 @@ fn SE_Vx_byte(self: *Chip8) void {
 }
 
 /// 4xkk -> SNE Vx, byte: skip next instruction if Vx != kk
-fn SNE_Vx_byte(self: *Chip8) void {
+fn OP_4xkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const byte: u8 = @intCast(self.opcode & 0x00FF);
 
@@ -129,7 +183,7 @@ fn SNE_Vx_byte(self: *Chip8) void {
 }
 
 /// 5xy0 -> SE Vx, Vy: skip net instruction if Vx == Vy
-fn SE_Vx_Vy(self: *Chip8) void {
+fn OP_5xy0(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -139,7 +193,7 @@ fn SE_Vx_Vy(self: *Chip8) void {
 }
 
 /// 6xkk -> LD Vx, byte: set Vx = kk
-fn LD_Vx_byte(self: *Chip8) void {
+fn OP_6xkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const byte: u8 = @intCast(self.opcode & 0x00FF);
 
@@ -147,7 +201,7 @@ fn LD_Vx_byte(self: *Chip8) void {
 }
 
 /// 7xkk -> ADD Vx, byte: set Vx = kk
-fn ADD_Vx_byte(self: *Chip8) void {
+fn OP_7xkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     // +% wraps when overflow
@@ -155,7 +209,7 @@ fn ADD_Vx_byte(self: *Chip8) void {
 }
 
 /// 8xy0 -> LD Vx, Vy: set Vx = Vy
-fn LD_Vx_Vy(self: *Chip8) void {
+fn OP_8xy0(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -163,7 +217,7 @@ fn LD_Vx_Vy(self: *Chip8) void {
 }
 
 /// 8xy1 -> OR Vx, Vy: set Vx = Vx OR Vy
-fn OR_Vx_Vy(self: *Chip8) void {
+fn OP_8xy1(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -171,7 +225,7 @@ fn OR_Vx_Vy(self: *Chip8) void {
 }
 
 /// 8xy2 -> AND Vx, Vy: set Vx = Vx AND Vy
-fn AND_Vx_Vy(self: *Chip8) void {
+fn OP_8xy2(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -179,7 +233,7 @@ fn AND_Vx_Vy(self: *Chip8) void {
 }
 
 /// 8xy3 -> XOR Vx, Vy: set Vx = Vx XOR Vy
-fn XOR_Vx_Vy(self: *Chip8) void {
+fn OP_8xy3(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -188,7 +242,7 @@ fn XOR_Vx_Vy(self: *Chip8) void {
 
 /// 8xy4 -> ADD Vx, Vy: set Vx = Vx + Vy, set VF = carry
 /// add with overflow. VF is set to 1 if result greater than 8 bits
-fn ADD_Vx_Vy(self: *Chip8) void {
+fn OP_8xy4(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -197,7 +251,7 @@ fn ADD_Vx_Vy(self: *Chip8) void {
 
 /// 8xy5 -> SUB VX, Vy: set Vx = Vx - Vy, set VF = NOT borrow
 /// sub with overflow. if Vx > Vy, then VF is set to 1, otherwise 0
-fn SUB_Vx_Vy(self: *Chip8) void {
+fn OP_8xy5(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -206,7 +260,7 @@ fn SUB_Vx_Vy(self: *Chip8) void {
 
 /// 8xy6 -> SHR Vx: set Vx = Vx SHR 1
 /// right shift (div by 2) with overflow of least significant bit
-fn SHR_Vx(self: *Chip8) void {
+fn OP_8xy6(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     self.registers[0xF] = self.registers[Vx] & 0x1;
@@ -215,7 +269,7 @@ fn SHR_Vx(self: *Chip8) void {
 
 /// 8xy7 -> SUBN Vx, Vy: set Vx = Vy - Vx, set VF = NOT borrow
 /// sub with overflow. if Vy > Vx, then VF is set to 1, otherwise 0
-fn SUBN_Vx_Vy(self: *Chip8) void {
+fn OP_8xy7(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -224,14 +278,14 @@ fn SUBN_Vx_Vy(self: *Chip8) void {
 
 /// 8xyE -> SHL Vx: set Vx = Vx SHL 1
 /// left shift (mult by 2) with overflow
-fn SHL_Vx(self: *Chip8) void {
+fn OP_8xyE(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     self.registers[Vx], self.registers[0xF] = @shlWithOverflow(self.registers[Vx], 1);
 }
 
 /// 9xy0 -> SNE Vx, Vy: skip next instruction if Vx != Vy
-fn SNE_Vx_Vy(self: *Chip8) void {
+fn OP_9xy0(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
 
@@ -241,18 +295,18 @@ fn SNE_Vx_Vy(self: *Chip8) void {
 }
 
 /// Annn -> LD I, addr: set I = nnn
-fn LD_I_addr(self: *Chip8) void {
+fn OP_Annn(self: *Chip8) void {
     self.index = self.opcode & 0x0FFF;
 }
 
 /// Bnnn -> JP V0, addr: jump to location nnn + V0
-fn JP_V0_addr(self: *Chip8) void {
+fn OP_Bnnn(self: *Chip8) void {
     const addr: u16 = self.opcode & 0x0FFF;
     self.pc = self.registers[0x0] + addr;
 }
 
 /// Cxkk -> RND Vx, byte: set Vx = random byte AND kk
-fn RND_Vx_byte(self: *Chip8) void {
+fn OP_Cxkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const byte: u8 = @intCast(self.opcode & 0x00FF);
 
@@ -261,21 +315,21 @@ fn RND_Vx_byte(self: *Chip8) void {
 
 /// Dxyn -> DRW Vx, Vy, nibble
 /// display n-byte sprite from memory location I at (Vx, Vy), set VF = collision
-fn DRW_Vx_Vy_n(self: *Chip8) void {
+fn OP_Dxyn(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const Vy: u8 = @intCast((self.opcode & 0x00F0) >> 4);
     const height: u8 = @intCast(self.opcode & 0x000F);
     const width: u8 = 8;
 
     // wrap if beyond screen boundaries
-    const x_pos = self.registers[Vx] % self.VIDEO_WIDTH;
-    const y_pos = self.registers[Vy] % self.VIDEO_HEIGHT;
+    const x_pos = self.registers[Vx] % VIDEO_WIDTH;
+    const y_pos = self.registers[Vy] % VIDEO_HEIGHT;
 
     self.registers[0xF] = 0;
 
     for (0..height) |row| {
         const sprite_byte = self.memory[self.index + row];
-        const index: u12 = @intCast(((y_pos + row) * self.VIDEO_WIDTH) + x_pos);
+        const index: u12 = @intCast(((y_pos + row) * VIDEO_WIDTH) + x_pos);
         const current = self.display[index .. index + width];
 
         for (0..width) |col| {
@@ -293,7 +347,7 @@ fn DRW_Vx_Vy_n(self: *Chip8) void {
 }
 
 /// Ex9E -> SKP Vx: skip next instruction if key is pressed
-fn SKP_Vx(self: *Chip8) void {
+fn OP_Ex9E(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const key = self.registers[Vx];
 
@@ -303,7 +357,7 @@ fn SKP_Vx(self: *Chip8) void {
 }
 
 /// ExA1 -> SKNP Vx: skip next instruction if key is not pressed
-fn SKNP_Vx(self: *Chip8) void {
+fn OP_ExA1(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const key = self.registers[Vx];
 
@@ -313,7 +367,7 @@ fn SKNP_Vx(self: *Chip8) void {
 }
 
 /// Fx07 -> LD Vx, DT: set Vx = delay timer value
-fn LD_Vx_DT(self: *Chip8) void {
+fn OP_Fx07(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     self.registers[Vx] = self.delay_timer;
 }
@@ -321,7 +375,7 @@ fn LD_Vx_DT(self: *Chip8) void {
 /// Fx0A -> LD Vx, K: wait for key press and store value of key in Vx
 /// when no key is pressed the program waits by not moving the program counter
 /// (self.pc -= 2)
-fn LD_Vx_K(self: *Chip8) void {
+fn OP_Fx0A(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     for (0..16) |key| {
@@ -336,35 +390,35 @@ fn LD_Vx_K(self: *Chip8) void {
 }
 
 /// Fx15 -> LD DT, Vx: set delay timer = Vx
-fn LD_DT_Vx(self: *Chip8) void {
+fn OP_Fx15(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     self.delay_timer = self.registers[Vx];
 }
 
 /// Fx18 -> LD ST, Vx: set sound timer = Vx
-fn LD_ST_Vx(self: *Chip8) void {
+fn OP_Fx18(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     self.sound_timer = self.registers[Vx];
 }
 
 /// Fx1E -> ADD I, Vx: set I = I + Vx
-fn ADD_I_Vx(self: *Chip8) void {
+fn OP_Fx1E(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     self.index += @intCast(self.registers[Vx]);
 }
 
 /// Fx29 -> LD F, Vx: set I = location of sprite for digit at register Vx
-fn LD_F_Vx(self: *Chip8) void {
+fn OP_Fx29(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     // every digit is 5 bytes long
-    self.index = self.FONTSET_START_ADDR + (self.registers[Vx] * 5);
+    self.index = FONTSET_START_ADDR + (self.registers[Vx] * 5);
 }
 
 /// Fx33 -> LD B, Vx: store BCD representation of Vx in memory locations I,
 /// I+1, and I+2
 /// Interpreter takes decimal value of Vx, and places hundreds digit in memory
 /// at location in I, tens digit at I+1, and ones digit at I+2
-fn LD_B_Vx(self: *Chip8) void {
+fn OP_Fx33(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     var value = self.registers[Vx];
@@ -379,7 +433,7 @@ fn LD_B_Vx(self: *Chip8) void {
 
 /// Fx55 -> LD [I], Vx: store registers V0 through Vx in memory starting at
 /// location I
-fn LD_I_Vx(self: *Chip8) void {
+fn OP_Fx55(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     const start = self.index;
@@ -388,12 +442,17 @@ fn LD_I_Vx(self: *Chip8) void {
 }
 
 /// Fx65 -> LD Vx, [I]: read registers V0 through Vx from memory starting at
-fn LD_Vx_I(self: *Chip8) void {
+fn OP_Fx65(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
 
     const start = self.index;
     const end = self.index + Vx + 1;
     std.mem.copyForwards(u8, self.registers[0 .. Vx + 1], self.memory[start..end]);
+}
+
+/// NOP: no operation (used for unknown opcodes)
+fn NOP(self: *Chip8) void {
+    _ = self;
 }
 
 // ============================================
@@ -464,7 +523,7 @@ test "clear display" {
     @memset(chip8.display[250..300], true);
     @memset(chip8.display[400..500], true);
 
-    chip8.CLS();
+    chip8.OP_00E0();
 
     try std.testing.expectEqualSlices(bool, &clean, &chip8.display);
 }
@@ -477,7 +536,7 @@ test "return from subroutine" {
     chip8.sp += 1;
     chip8.pc = 10;
 
-    chip8.RET();
+    chip8.OP_00EE();
 
     try std.testing.expectEqual(6, chip8.sp);
     try std.testing.expectEqual(5, chip8.pc);
@@ -487,7 +546,7 @@ test "jump to location" {
     var chip8 = Chip8.init();
 
     chip8.opcode = 0x13AF;
-    chip8.JP_addr();
+    chip8.OP_1nnn();
 
     try std.testing.expectEqual(0x3AF, chip8.pc);
 }
@@ -498,7 +557,7 @@ test "call function" {
     chip8.opcode = 0x27F7;
     var old_pc = chip8.pc;
     var old_sp = chip8.sp;
-    chip8.CALL_addr();
+    chip8.OP_2nnn();
 
     try std.testing.expectEqual(0x7F7, chip8.pc);
     try std.testing.expectEqual(1, chip8.sp);
@@ -507,7 +566,7 @@ test "call function" {
     chip8.opcode = 0x253A;
     old_pc = chip8.pc;
     old_sp = chip8.sp;
-    chip8.CALL_addr();
+    chip8.OP_2nnn();
 
     try std.testing.expectEqual(0x53A, chip8.pc);
     try std.testing.expectEqual(2, chip8.sp);
@@ -520,14 +579,14 @@ test "SE Vx byte, Vx == kk" {
     chip8.registers[0x0] = 0x45;
     chip8.opcode = 0x3045;
 
-    chip8.SE_Vx_byte();
+    chip8.OP_3xkk();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
     chip8.registers[0xB] = 0xFA;
     chip8.opcode = 0x3BFA;
 
-    chip8.SE_Vx_byte();
+    chip8.OP_3xkk();
 
     try std.testing.expectEqual(0x200 + 4, chip8.pc);
 }
@@ -538,7 +597,7 @@ test "SE Vx byte, Vx != kk" {
     chip8.registers[0x0] = 0x45;
     chip8.opcode = 0x303A;
 
-    chip8.SE_Vx_byte();
+    chip8.OP_3xkk();
 
     try std.testing.expectEqual(0x200, chip8.pc);
 }
@@ -549,14 +608,14 @@ test "SNE Vx byte, Vx != kk" {
     chip8.registers[0xE] = 0x11;
     chip8.opcode = 0x3E10;
 
-    chip8.SNE_Vx_byte();
+    chip8.OP_4xkk();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
     chip8.registers[0x8] = 0x15;
     chip8.opcode = 0x3800;
 
-    chip8.SNE_Vx_byte();
+    chip8.OP_4xkk();
 
     try std.testing.expectEqual(0x200 + 4, chip8.pc);
 }
@@ -567,7 +626,7 @@ test "SNE Vx byte, Vx == kk" {
     chip8.registers[0x3] = 0xA5;
     chip8.opcode = 0x33A5;
 
-    chip8.SNE_Vx_byte();
+    chip8.OP_4xkk();
 
     try std.testing.expectEqual(0x200, chip8.pc);
 }
@@ -579,7 +638,7 @@ test "SE Vx Vy, Vx == Vy" {
     chip8.registers[0x4] = 0x55;
     chip8.opcode = 0x5540;
 
-    chip8.SE_Vx_Vy();
+    chip8.OP_5xy0();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
@@ -587,7 +646,7 @@ test "SE Vx Vy, Vx == Vy" {
     chip8.registers[0xA] = 0x34;
     chip8.opcode = 0x50A0;
 
-    chip8.SE_Vx_Vy();
+    chip8.OP_5xy0();
 
     try std.testing.expectEqual(0x200 + 4, chip8.pc);
 }
@@ -599,7 +658,7 @@ test "SE Vx Vy, Vx != Vy" {
     chip8.registers[0xA] = 0xA0;
     chip8.opcode = 0x51A0;
 
-    chip8.SE_Vx_Vy();
+    chip8.OP_5xy0();
 
     try std.testing.expectEqual(0x200, chip8.pc);
 }
@@ -609,7 +668,7 @@ test "load byte into Vx" {
 
     chip8.opcode = 0x6B3A;
 
-    chip8.LD_Vx_byte();
+    chip8.OP_6xkk();
 
     try std.testing.expectEqual(0x3A, chip8.registers[0xB]);
 }
@@ -618,12 +677,12 @@ test "add byte to Vx" {
     var chip8 = Chip8.init();
 
     chip8.opcode = 0x7A34;
-    chip8.ADD_Vx_byte();
+    chip8.OP_7xkk();
 
     try std.testing.expectEqual(0x34, chip8.registers[0xA]);
 
     chip8.opcode = 0x7A54;
-    chip8.ADD_Vx_byte();
+    chip8.OP_7xkk();
 
     try std.testing.expectEqual(0x34 +% 0x54, chip8.registers[0xA]);
 }
@@ -632,12 +691,12 @@ test "add byte to Vx with wrap" {
     var chip8 = Chip8.init();
 
     chip8.opcode = 0x7BFA;
-    chip8.ADD_Vx_byte();
+    chip8.OP_7xkk();
 
     try std.testing.expectEqual(@as(u8, 0xFA), chip8.registers[0xB]);
 
     chip8.opcode = 0x7BAB;
-    chip8.ADD_Vx_byte();
+    chip8.OP_7xkk();
 
     try std.testing.expectEqual(@as(u8, 0xFA) +% 0xAB, chip8.registers[0xB]);
 }
@@ -666,7 +725,7 @@ test "OR Vx Vy" {
     chip8.registers[0x8] = snd;
     chip8.opcode = 0x8581;
 
-    chip8.OR_Vx_Vy();
+    chip8.OP_8xy1();
 
     try std.testing.expectEqual(fst | snd, chip8.registers[0x5]);
 }
@@ -681,7 +740,7 @@ test "AND Vx Vy" {
     chip8.registers[0x9] = snd;
     chip8.opcode = 0x8C92;
 
-    chip8.AND_Vx_Vy();
+    chip8.OP_8xy2();
 
     try std.testing.expectEqual(fst & snd, chip8.registers[0xC]);
 }
@@ -696,7 +755,7 @@ test "XOR Vx Vy" {
     chip8.registers[0xD] = snd;
     chip8.opcode = 0x88D3;
 
-    chip8.XOR_Vx_Vy();
+    chip8.OP_8xy3();
 
     try std.testing.expectEqual(fst ^ snd, chip8.registers[0x8]);
 }
@@ -711,7 +770,7 @@ test "ADD Vx Vy with carry" {
     chip8.registers[0x8] = snd;
     chip8.opcode = 0x8584;
 
-    chip8.ADD_Vx_Vy();
+    chip8.OP_8xy4();
 
     try std.testing.expectEqual(fst +% snd, chip8.registers[0x5]);
     try std.testing.expectEqual(0, chip8.registers[0xF]);
@@ -727,7 +786,7 @@ test "ADD Vx Vy with carry with overflow" {
     chip8.registers[0xA] = snd;
     chip8.opcode = 0x8CA4;
 
-    chip8.ADD_Vx_Vy();
+    chip8.OP_8xy4();
 
     try std.testing.expectEqual(fst +% snd, chip8.registers[0xC]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
@@ -743,7 +802,7 @@ test "SUB Vx Vy" {
     chip8.registers[0x7] = snd;
     chip8.opcode = 0x8475;
 
-    chip8.SUB_Vx_Vy();
+    chip8.OP_8xy5();
 
     try std.testing.expectEqual(fst -% snd, chip8.registers[0x4]);
     try std.testing.expectEqual(0, chip8.registers[0xF]);
@@ -759,7 +818,7 @@ test "SUB Vx Vy with overflow" {
     chip8.registers[0x0] = snd;
     chip8.opcode = 0x8805;
 
-    chip8.SUB_Vx_Vy();
+    chip8.OP_8xy5();
 
     try std.testing.expectEqual(fst -% snd, chip8.registers[0x8]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
@@ -773,7 +832,7 @@ test "shift right Vx" {
     chip8.registers[0x3] = num;
     chip8.opcode = 0x8306;
 
-    chip8.SHR_Vx();
+    chip8.OP_8xy6();
 
     try std.testing.expectEqual(num >> 1, chip8.registers[0x3]);
     try std.testing.expectEqual(0, chip8.registers[0xF]);
@@ -787,7 +846,7 @@ test "shift right Vx with overflow" {
     chip8.registers[0xA] = num;
     chip8.opcode = 0x8A06;
 
-    chip8.SHR_Vx();
+    chip8.OP_8xy6();
 
     try std.testing.expectEqual(num >> 1, chip8.registers[0xA]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
@@ -803,7 +862,7 @@ test "SUBN Vx Vy" {
     chip8.registers[0x7] = fst;
     chip8.opcode = 0x8475;
 
-    chip8.SUBN_Vx_Vy();
+    chip8.OP_8xy7();
 
     try std.testing.expectEqual(fst -% snd, chip8.registers[0x4]);
     try std.testing.expectEqual(0, chip8.registers[0xF]);
@@ -819,7 +878,7 @@ test "SUBN Vx Vy with overflow" {
     chip8.registers[0x0] = fst;
     chip8.opcode = 0x8805;
 
-    chip8.SUBN_Vx_Vy();
+    chip8.OP_8xy7();
 
     try std.testing.expectEqual(fst -% snd, chip8.registers[0x8]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
@@ -833,7 +892,7 @@ test "shift left Vx" {
     chip8.registers[0x3] = num;
     chip8.opcode = 0x8306;
 
-    chip8.SHL_Vx();
+    chip8.OP_8xyE();
 
     try std.testing.expectEqual(num << 1, chip8.registers[0x3]);
     try std.testing.expectEqual(0, chip8.registers[0xF]);
@@ -847,7 +906,7 @@ test "shift left Vx with overflow" {
     chip8.registers[0xA] = num;
     chip8.opcode = 0x8A06;
 
-    chip8.SHL_Vx();
+    chip8.OP_8xyE();
 
     try std.testing.expectEqual(num << 1, chip8.registers[0xA]);
     try std.testing.expectEqual(1, chip8.registers[0xF]);
@@ -860,7 +919,7 @@ test "SNE Vx Vy, Vx != Vy" {
     chip8.registers[0xD] = 0x13;
     chip8.opcode = 0x9ED0;
 
-    chip8.SNE_Vx_Vy();
+    chip8.OP_9xy0();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
@@ -868,7 +927,7 @@ test "SNE Vx Vy, Vx != Vy" {
     chip8.registers[0xA] = 0x13;
     chip8.opcode = 0x98A0;
 
-    chip8.SNE_Vx_Vy();
+    chip8.OP_9xy0();
 
     try std.testing.expectEqual(0x200 + 4, chip8.pc);
 }
@@ -880,7 +939,7 @@ test "SNE Vx Vy, Vx == Vy" {
     chip8.registers[0x4] = 0xA5;
     chip8.opcode = 0x9340;
 
-    chip8.SNE_Vx_Vy();
+    chip8.OP_9xy0();
 
     try std.testing.expectEqual(0x200, chip8.pc);
 }
@@ -890,7 +949,7 @@ test "load address into index" {
 
     chip8.opcode = 0xAF87;
 
-    chip8.LD_I_addr();
+    chip8.OP_Annn();
 
     try std.testing.expectEqual(0xF87, chip8.index);
 }
@@ -901,7 +960,7 @@ test "jump to address + V0" {
     chip8.registers[0x0] = 0x87;
     chip8.opcode = 0xB34F;
 
-    chip8.JP_V0_addr();
+    chip8.OP_Bnnn();
 
     try std.testing.expectEqual(0x87 + 0x34F, chip8.pc);
 }
@@ -911,7 +970,7 @@ test "drawing to display" {
 
     // select character to draw (E)
     chip8.opcode = 0xA096;
-    chip8.LD_I_addr();
+    chip8.OP_Annn();
 
     // how E should be displayed
     const E = [5][8]bool{
@@ -928,7 +987,7 @@ test "drawing to display" {
 
     // perform draw
     chip8.opcode = 0xD235;
-    chip8.DRW_Vx_Vy_n();
+    chip8.OP_Dxyn();
 
     var first: u12 = 3 * 64 + 2;
     try std.testing.expectEqualSlices(bool, &E[0], chip8.display[first .. first + 8]);
@@ -944,7 +1003,7 @@ test "drawing to display" {
 
     // select next character to draw (F)
     chip8.opcode = 0xA09B;
-    chip8.LD_I_addr();
+    chip8.OP_Annn();
 
     // how E xor F should be displayed
     const ExorF = [5][8]bool{
@@ -957,7 +1016,7 @@ test "drawing to display" {
 
     // perform draw
     chip8.opcode = 0xD235;
-    chip8.DRW_Vx_Vy_n();
+    chip8.OP_Dxyn();
 
     first = 3 * 64 + 2;
     try std.testing.expectEqualSlices(bool, &ExorF[0], chip8.display[first .. first + 8]);
@@ -979,14 +1038,14 @@ test "skip if key pressed" {
     chip8.keypad[0x5] = true;
     chip8.opcode = 0xE19E;
 
-    chip8.SKP_Vx();
+    chip8.OP_Ex9E();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
     chip8.registers[0x2] = 0xA;
     chip8.opcode = 0xE29E;
 
-    chip8.SKP_Vx();
+    chip8.OP_Ex9E();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 }
@@ -998,7 +1057,7 @@ test "skip if key not pressed" {
     chip8.keypad[0x5] = false;
     chip8.opcode = 0xE1A1;
 
-    chip8.SKNP_Vx();
+    chip8.OP_ExA1();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 
@@ -1006,7 +1065,7 @@ test "skip if key not pressed" {
     chip8.keypad[0xA] = true;
     chip8.opcode = 0xE2A1;
 
-    chip8.SKNP_Vx();
+    chip8.OP_ExA1();
 
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 }
@@ -1017,7 +1076,7 @@ test "set Vx = delay timer" {
     chip8.delay_timer = 55;
     chip8.opcode = 0xF107;
 
-    chip8.LD_Vx_DT();
+    chip8.OP_Fx07();
 
     try std.testing.expectEqual(55, chip8.registers[0x1]);
 }
@@ -1029,7 +1088,7 @@ test "wait for key press and store in Vx" {
     chip8.pc += 2;
 
     // no key pressed, pc should remain the same after calling LD_Vx_K
-    chip8.LD_Vx_K();
+    chip8.OP_Fx0A();
     try std.testing.expectEqual(0x0, chip8.registers[0x3]);
     try std.testing.expectEqual(0x200, chip8.pc);
 
@@ -1037,7 +1096,7 @@ test "wait for key press and store in Vx" {
     chip8.keypad[0x7] = true;
     chip8.pc += 2;
 
-    chip8.LD_Vx_K();
+    chip8.OP_Fx0A();
     try std.testing.expectEqual(0x7, chip8.registers[0x3]);
     try std.testing.expectEqual(0x200 + 2, chip8.pc);
 }
@@ -1048,7 +1107,7 @@ test "set delay timer = Vx" {
     chip8.registers[0x4] = 120;
     chip8.opcode = 0xF415;
 
-    chip8.LD_DT_Vx();
+    chip8.OP_Fx15();
 
     try std.testing.expectEqual(120, chip8.delay_timer);
 }
@@ -1059,7 +1118,7 @@ test "set sound timer = Vx" {
     chip8.registers[0x9] = 200;
     chip8.opcode = 0xF918;
 
-    chip8.LD_ST_Vx();
+    chip8.OP_Fx18();
 
     try std.testing.expectEqual(200, chip8.sound_timer);
 }
@@ -1071,7 +1130,7 @@ test "add Vx to I" {
     chip8.registers[0x2] = 0x50;
     chip8.opcode = 0xF21E;
 
-    chip8.ADD_I_Vx();
+    chip8.OP_Fx1E();
 
     try std.testing.expectEqual(0x350, chip8.index);
 }
@@ -1082,16 +1141,16 @@ test "set I to location of sprite for digit in Vx" {
     chip8.registers[0x3] = 0xA; // digit A
     chip8.opcode = 0xF329;
 
-    chip8.LD_F_Vx();
+    chip8.OP_Fx29();
 
-    try std.testing.expectEqual(chip8.FONTSET_START_ADDR + (0xA * 5), chip8.index);
+    try std.testing.expectEqual(FONTSET_START_ADDR + (0xA * 5), chip8.index);
 
     chip8.registers[0x7] = 0x4; // digit 4
     chip8.opcode = 0xF729;
 
-    chip8.LD_F_Vx();
+    chip8.OP_Fx29();
 
-    try std.testing.expectEqual(chip8.FONTSET_START_ADDR + (0x4 * 5), chip8.index);
+    try std.testing.expectEqual(FONTSET_START_ADDR + (0x4 * 5), chip8.index);
 }
 
 test "store BCD representation of Vx in memory" {
@@ -1101,7 +1160,7 @@ test "store BCD representation of Vx in memory" {
     chip8.index = 0x300;
     chip8.opcode = 0xF533;
 
-    chip8.LD_B_Vx();
+    chip8.OP_Fx33();
 
     try std.testing.expectEqual(2, chip8.memory[0x300]);
     try std.testing.expectEqual(3, chip8.memory[0x301]);
@@ -1111,7 +1170,7 @@ test "store BCD representation of Vx in memory" {
     chip8.index = 0x400;
     chip8.opcode = 0xFA33;
 
-    chip8.LD_B_Vx();
+    chip8.OP_Fx33();
 
     try std.testing.expectEqual(0, chip8.memory[0x400]);
     try std.testing.expectEqual(5, chip8.memory[0x401]);
@@ -1130,7 +1189,7 @@ test "store registers V0 through Vx in memory starting at I" {
     chip8.index = 0x300;
     chip8.opcode = 0xF455; // store V0 through V4
 
-    chip8.LD_I_Vx();
+    chip8.OP_Fx55();
 
     try std.testing.expectEqual(0x12, chip8.memory[0x300]);
     try std.testing.expectEqual(0x34, chip8.memory[0x301]);
@@ -1151,7 +1210,7 @@ test "read registers V0 through Vx from memory starting at I" {
     chip8.index = 0x400;
     chip8.opcode = 0xF465; // read into V0 through V4
 
-    chip8.LD_Vx_I();
+    chip8.OP_Fx65();
 
     try std.testing.expectEqual(0xAB, chip8.registers[0x0]);
     try std.testing.expectEqual(0xCD, chip8.registers[0x1]);
