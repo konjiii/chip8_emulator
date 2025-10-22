@@ -3,8 +3,8 @@ const Chip8 = @This();
 
 const std = @import("std");
 
-const VIDEO_WIDTH: u8 = 64;
-const VIDEO_HEIGHT: u8 = 32;
+pub const DISPLAY_WIDTH: u8 = 64;
+pub const DISPLAY_HEIGHT: u8 = 32;
 // where the fontset is stored in memory
 const FONTSET_START_ADDR: u16 = 0x50;
 
@@ -22,7 +22,7 @@ sp: u8 = 0,
 delay_timer: u8 = 0,
 sound_timer: u8 = 0,
 keypad: [16]bool = @splat(false),
-display: [@as(u16, VIDEO_WIDTH) * VIDEO_HEIGHT]bool = @splat(false),
+display: [@as(u16, DISPLAY_WIDTH) * DISPLAY_HEIGHT]bool = @splat(false),
 opcode: u16 = 0,
 rand: std.Random = undefined,
 // function pointer table for quick opcode instruction lookup
@@ -81,6 +81,22 @@ pub fn init() Chip8 {
     std.mem.copyForwards(u8, chip8.memory[start..end], &fontset);
 
     return chip8;
+}
+
+/// main chip8 cycle
+pub fn cycle(self: *Chip8) void {
+    // obtain next opcode: 2 8-bit parts in memory
+    self.opcode = (@as(u16, self.memory[self.pc]) << 8) | self.memory[self.pc + 1];
+
+    self.pc += 2;
+
+    const table_index = (self.opcode & 0xF000) >> 12;
+    // execute the function that corresponds to the opcode
+    self.fn_ptr_tbl[table_index](self);
+
+    // decrement delay and sound timer
+    self.delay_timer = if (self.delay_timer > 0) self.delay_timer - 1 else 0;
+    self.sound_timer = if (self.sound_timer > 0) self.sound_timer - 1 else 0;
 }
 
 /// Load a ROM into memory
@@ -345,14 +361,14 @@ fn OP_Dxyn(self: *Chip8) void {
     const width: u8 = 8;
 
     // wrap if beyond screen boundaries
-    const x_pos = self.registers[Vx] % VIDEO_WIDTH;
-    const y_pos = self.registers[Vy] % VIDEO_HEIGHT;
+    const x_pos = self.registers[Vx] % DISPLAY_WIDTH;
+    const y_pos = self.registers[Vy] % DISPLAY_HEIGHT;
 
     self.registers[0xF] = 0;
 
     for (0..height) |row| {
         const sprite_byte = self.memory[self.index + row];
-        const index: u12 = @intCast(((y_pos + row) * VIDEO_WIDTH) + x_pos);
+        const index: u12 = @intCast(((y_pos + row) * DISPLAY_WIDTH) + x_pos);
         const current = self.display[index .. index + width];
 
         for (0..width) |col| {
