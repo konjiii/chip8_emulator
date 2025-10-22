@@ -3,7 +3,6 @@ const Chip8 = @import("Chip8.zig");
 
 pub fn main() !void {
     var chip8 = Chip8.init();
-    std.debug.print("{d}\n", .{chip8.randByte()});
 
     chip8.loadRom("./chip8/roms/games/Cave.ch8") catch |err| {
         switch (err) {

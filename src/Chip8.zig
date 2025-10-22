@@ -21,6 +21,7 @@ keypad: [16]bool = @splat(false),
 display: [64 * 32]bool = @splat(false),
 opcode: u16 = 0,
 rand: std.Random = undefined,
+fn_ptr_tbl: [0xF + 1]OpFn = undefined,
 
 pub fn init() Chip8 {
     // generate random seed
@@ -29,7 +30,25 @@ pub fn init() Chip8 {
     var prng = std.Random.DefaultPrng.init(seed);
     const rand = prng.random();
 
-    var chip8 = Chip8{ .rand = rand };
+    // initialize rand and function pointer table
+    var chip8 = Chip8{ .rand = rand, .fn_ptr_tbl = .{
+        Chip8.dispatch0,
+        Chip8.OP_1nnn,
+        Chip8.OP_2nnn,
+        Chip8.OP_3xkk,
+        Chip8.OP_4xkk,
+        Chip8.OP_5xy0,
+        Chip8.OP_6xkk,
+        Chip8.OP_7xkk,
+        Chip8.dispatch8,
+        Chip8.OP_9xy0,
+        Chip8.OP_Annn,
+        Chip8.OP_Bnnn,
+        Chip8.OP_Cxkk,
+        Chip8.OP_Dxyn,
+        Chip8.dispatchE,
+        Chip8.dispatchF,
+    } };
 
     // define fontset
     const fontset: [80]u8 = .{
