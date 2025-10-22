@@ -5,23 +5,45 @@ const std = @import("std");
 
 const VIDEO_WIDTH: u8 = 64;
 const VIDEO_HEIGHT: u8 = 32;
+// where the fontset is stored in memory
 const FONTSET_START_ADDR: u16 = 0x50;
 
+// definition of opcode function types
 const OpFn = *const fn (self: *Chip8) void;
 
+// 16 8-bit registers: V0 to VF
 registers: [16]u8 = @splat(0),
 memory: [4096]u8 = @splat(0),
 index: u16 = 0,
+// program counter starts at 0x200 where the roms are loaded
 pc: u16 = 0x200,
 stack: [16]u16 = @splat(0),
 sp: u8 = 0,
 delay_timer: u8 = 0,
 sound_timer: u8 = 0,
 keypad: [16]bool = @splat(false),
-display: [64 * 32]bool = @splat(false),
+display: [@as(u16, VIDEO_WIDTH) * VIDEO_HEIGHT]bool = @splat(false),
 opcode: u16 = 0,
 rand: std.Random = undefined,
-fn_ptr_tbl: [0xF + 1]OpFn = undefined,
+// function pointer table for quick opcode instruction lookup
+comptime fn_ptr_tbl: [0xF + 1]OpFn = .{
+    Chip8.dispatch0,
+    Chip8.OP_1nnn,
+    Chip8.OP_2nnn,
+    Chip8.OP_3xkk,
+    Chip8.OP_4xkk,
+    Chip8.OP_5xy0,
+    Chip8.OP_6xkk,
+    Chip8.OP_7xkk,
+    Chip8.dispatch8,
+    Chip8.OP_9xy0,
+    Chip8.OP_Annn,
+    Chip8.OP_Bnnn,
+    Chip8.OP_Cxkk,
+    Chip8.OP_Dxyn,
+    Chip8.dispatchE,
+    Chip8.dispatchF,
+},
 
 pub fn init() Chip8 {
     // generate random seed
@@ -30,25 +52,7 @@ pub fn init() Chip8 {
     var prng = std.Random.DefaultPrng.init(seed);
     const rand = prng.random();
 
-    // initialize rand and function pointer table
-    var chip8 = Chip8{ .rand = rand, .fn_ptr_tbl = .{
-        Chip8.dispatch0,
-        Chip8.OP_1nnn,
-        Chip8.OP_2nnn,
-        Chip8.OP_3xkk,
-        Chip8.OP_4xkk,
-        Chip8.OP_5xy0,
-        Chip8.OP_6xkk,
-        Chip8.OP_7xkk,
-        Chip8.dispatch8,
-        Chip8.OP_9xy0,
-        Chip8.OP_Annn,
-        Chip8.OP_Bnnn,
-        Chip8.OP_Cxkk,
-        Chip8.OP_Dxyn,
-        Chip8.dispatchE,
-        Chip8.dispatchF,
-    } };
+    var chip8 = Chip8{ .rand = rand };
 
     // define fontset
     const fontset: [80]u8 = .{
@@ -101,7 +105,7 @@ fn randByte(self: *const Chip8) u8 {
     return self.rand.int(u8);
 }
 
-// dispatch functions for nested tables
+// dispatch functions for nested function pointer tables
 fn dispatch0(self: *Chip8) void {
     comptime var table_0: [0xE + 1]OpFn = @splat(Chip8.NOP);
     table_0[0x0] = Chip8.OP_00E0;
