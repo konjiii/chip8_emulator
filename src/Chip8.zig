@@ -1,4 +1,4 @@
-/// chip-8 emulator main module
+//! chip-8 emulator main module
 const Chip8 = @This();
 
 const std = @import("std");
@@ -85,19 +85,21 @@ pub fn init() Chip8 {
 }
 
 /// main chip8 cycle
-pub fn cycle(self: *Chip8) void {
-    // obtain next opcode: 2 8-bit parts in memory
-    self.opcode = (@as(u16, self.memory[self.pc]) << 8) | self.memory[self.pc + 1];
+pub fn cycle(self: *Chip8, amount: i32) void {
+    for (0..@intCast(amount)) |_| {
+        // obtain next opcode: 2 8-bit parts in memory
+        self.opcode = (@as(u16, self.memory[self.pc]) << 8) | self.memory[self.pc + 1];
 
-    self.pc += 2;
+        self.pc += 2;
 
-    const table_index = (self.opcode & 0xF000) >> 12;
-    // execute the function that corresponds to the opcode
-    self.fn_ptr_tbl[table_index](self);
+        const table_index = (self.opcode & 0xF000) >> 12;
+        // execute the function that corresponds to the opcode
+        self.fn_ptr_tbl[table_index](self);
 
-    // decrement delay and sound timer
-    self.delay_timer = if (self.delay_timer > 0) self.delay_timer - 1 else 0;
-    self.sound_timer = if (self.sound_timer > 0) self.sound_timer - 1 else 0;
+        // decrement delay and sound timer
+        self.delay_timer = if (self.delay_timer > 0) self.delay_timer - 1 else 0;
+        self.sound_timer = if (self.sound_timer > 0) self.sound_timer - 1 else 0;
+    }
 }
 
 /// Load a ROM into memory

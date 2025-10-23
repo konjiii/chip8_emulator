@@ -15,6 +15,8 @@ virtual_height: i32 = 32 * 20,
 window_title: [:0]const u8 = "Chip8 Emulator",
 pixel_dim: i32 = 10,
 screen_texture: rl.Texture = undefined,
+fps: i32 = 60,
+cpu_clock: i32 = 500, // approx
 
 pub fn init(chip8: *Chip8) !Game {
     var game = Game{
@@ -51,14 +53,15 @@ pub fn run(self: *Game) void {
     };
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(self.fps);
+    const cycles_per_frame = @divTrunc(self.cpu_clock, self.fps);
 
     while (!rl.windowShouldClose()) {
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(BORDER_CLR);
 
-        self.chip8.cycle();
+        self.chip8.cycle(cycles_per_frame);
 
         const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
         const screen_height_f: f32 = @floatFromInt(rl.getScreenHeight());
