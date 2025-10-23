@@ -374,7 +374,11 @@ fn OP_Dxyn(self: *Chip8) void {
 
     for (0..height) |row| {
         const sprite_byte = self.memory[self.index + row];
-        const index: u12 = @intCast(((y_pos + row) * DISPLAY_WIDTH) + x_pos);
+        // make sure we don't go beyond the display buffer
+        const index: u12 = @intCast(@min(
+            ((y_pos + row) * DISPLAY_WIDTH) + x_pos,
+            @as(u12, DISPLAY_WIDTH) * DISPLAY_HEIGHT - width - 1,
+        ));
         const current = self.display[index .. index + width];
 
         for (0..width) |col| {
