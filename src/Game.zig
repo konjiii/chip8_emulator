@@ -62,6 +62,7 @@ pub fn run(self: *Game) void {
         rl.clearBackground(BORDER_CLR);
 
         self.chip8.cycle(cycles_per_frame);
+        self.chip8.updateTimers();
 
         const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
         const screen_height_f: f32 = @floatFromInt(rl.getScreenHeight());

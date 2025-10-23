@@ -95,11 +95,14 @@ pub fn cycle(self: *Chip8, amount: i32) void {
         const table_index = (self.opcode & 0xF000) >> 12;
         // execute the function that corresponds to the opcode
         self.fn_ptr_tbl[table_index](self);
-
-        // decrement delay and sound timer
-        self.delay_timer = if (self.delay_timer > 0) self.delay_timer - 1 else 0;
-        self.sound_timer = if (self.sound_timer > 0) self.sound_timer - 1 else 0;
     }
+}
+
+/// timer gets updated at 60Hz (same as fps)
+pub fn updateTimers(self: *Chip8) void {
+    // decrement delay and sound timer
+    self.delay_timer = if (self.delay_timer > 0) self.delay_timer - 1 else 0;
+    self.sound_timer = if (self.sound_timer > 0) self.sound_timer - 1 else 0;
 }
 
 /// Load a ROM into memory
