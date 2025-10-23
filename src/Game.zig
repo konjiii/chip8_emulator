@@ -82,7 +82,9 @@ pub fn run(self: *Game) void {
         defer rl.endDrawing();
         rl.clearBackground(BORDER_CLR);
 
+        // cycle cpu multiple times per frame
         self.chip8.cycle(cycles_per_frame);
+        // update timers at 60Hz
         self.chip8.updateTimers();
 
         const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
@@ -113,6 +115,8 @@ pub fn run(self: *Game) void {
             0, // rotation
             FOREGROUND_CLR, // draw color
         );
+
+        rl.drawFPS(10, 10);
     }
 
     rl.closeWindow();
