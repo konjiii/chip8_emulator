@@ -1,4 +1,4 @@
-//! chip-8 emulator main module
+//! chip-8 cpu main module
 const Chip8 = @This();
 
 const std = @import("std");
@@ -47,7 +47,7 @@ comptime fn_ptr_tbl: [0xF + 1]OpFn = .{
 },
 
 pub fn init() Chip8 {
-    // generate random seed
+    // generate random seed for the rng
     const seed = std.crypto.random.int(u64);
 
     var prng = std.Random.DefaultPrng.init(seed);
@@ -120,11 +120,6 @@ pub fn loadRom(self: *Chip8, file_name: []const u8) !void {
     }
 
     _ = try reader.readSliceShort(self.memory[0x200..]);
-}
-
-/// generate a random u8 integer
-fn randByte(self: *const Chip8) u8 {
-    return self.rand.int(u8);
 }
 
 // dispatch functions for nested function pointer tables
@@ -355,7 +350,7 @@ fn OP_Cxkk(self: *Chip8) void {
     const Vx: u8 = @intCast((self.opcode & 0x0F00) >> 8);
     const byte: u8 = @intCast(self.opcode & 0x00FF);
 
-    self.registers[Vx] = self.randByte() & byte;
+    self.registers[Vx] = self.rand.int(u8) & byte;
 }
 
 /// helper function to compare two rl.Color values
