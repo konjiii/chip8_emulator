@@ -13,9 +13,11 @@ const BORDER_CLR = rl.Color.dark_gray;
 const View = enum {
     MAIN_MENU,
     GAME,
+    EXIT,
 };
 
 chip8: Chip8,
+curr_rom: []const u8 = "",
 virtual_width: i32 = 64 * 20,
 virtual_height: i32 = 32 * 20,
 window_title: [:0]const u8 = "Chip8 Emulator",
@@ -67,10 +69,8 @@ pub fn init() !Emulator {
 
 /// emulator entry point
 pub fn start(self: *Emulator) !void {
-    std.debug.print("{d}\n", .{self.chip8.rand.int(u8)});
     // initialize raylib window
     rl.initWindow(self.virtual_width, self.virtual_height, self.window_title);
-    std.debug.print("{d}\n", .{self.chip8.rand.int(u8)});
     defer rl.closeWindow();
 
     rl.setTargetFPS(self.fps);
@@ -85,17 +85,62 @@ pub fn start(self: *Emulator) !void {
     while (!rl.windowShouldClose()) {
         switch (self.current_view) {
             .MAIN_MENU => {
-                self.emulate();
+                self.main_menu();
             },
             .GAME => {
                 self.emulate();
+            },
+            .EXIT => {
+                break;
             },
         }
     }
 }
 
 /// main menu view
-// pub fn main_menu(self: *Emulator) void {}
+pub fn main_menu(self: *Emulator) void {
+    rl.beginDrawing();
+    defer rl.endDrawing();
+    rl.clearBackground(BORDER_CLR);
+
+    const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
+    const screen_height_f: f32 = @floatFromInt(rl.getScreenHeight());
+    const virtual_width_f: f32 = @floatFromInt(self.virtual_width);
+    const virtual_height_f: f32 = @floatFromInt(self.virtual_height);
+
+    const scale: f32 = @min(
+        screen_width_f / virtual_width_f,
+        screen_height_f / virtual_height_f,
+    );
+
+    const button_width: f32 = 200 * scale;
+    const button_height: f32 = 50 * scale;
+
+    const font_size: i32 = @intFromFloat(20 * scale);
+    rg.setStyle(rg.Control.default, rg.ControlOrDefaultProperty{ .default = rg.DefaultProperty.text_size }, font_size);
+
+    const start_button_rec = rl.Rectangle{
+        .x = @divTrunc(screen_width_f - button_width, 2),
+        .y = @divTrunc(screen_height_f - button_height, 2) - 30 * scale,
+        .width = button_width,
+        .height = button_height,
+    };
+
+    if (rg.button(start_button_rec, "Start Game")) {
+        self.current_view = View.GAME;
+    }
+
+    const exit_button_rec = rl.Rectangle{
+        .x = @divTrunc(screen_width_f - button_width, 2),
+        .y = @divTrunc(screen_height_f - button_height, 2) + 40 * scale,
+        .width = button_width,
+        .height = button_height,
+    };
+
+    if (rg.button(exit_button_rec, "Exit")) {
+        self.current_view = View.EXIT;
+    }
+}
 
 /// run the main emulation loop
 pub fn emulate(self: *Emulator) void {
