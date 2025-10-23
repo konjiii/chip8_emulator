@@ -17,6 +17,25 @@ pixel_dim: i32 = 10,
 screen_texture: rl.Texture = undefined,
 fps: i32 = 60,
 cpu_clock: i32 = 500, // approx
+// map keyboard keys to Chip8 keys
+comptime key_map: [16]rl.KeyboardKey = .{
+    rl.KeyboardKey.x, // Key 0
+    rl.KeyboardKey.one, // Key 1
+    rl.KeyboardKey.two, // Key 2
+    rl.KeyboardKey.three, // Key 3
+    rl.KeyboardKey.q, // Key 4
+    rl.KeyboardKey.w, // Key 5
+    rl.KeyboardKey.e, // Key 6
+    rl.KeyboardKey.a, // Key 7
+    rl.KeyboardKey.s, // Key 8
+    rl.KeyboardKey.d, // Key 9
+    rl.KeyboardKey.z, // Key A
+    rl.KeyboardKey.c, // Key B
+    rl.KeyboardKey.four, // Key C
+    rl.KeyboardKey.r, // Key D
+    rl.KeyboardKey.f, // Key E
+    rl.KeyboardKey.v, // Key F
+},
 
 pub fn init(chip8: *Chip8) !Game {
     var game = Game{
@@ -57,6 +76,8 @@ pub fn run(self: *Game) void {
     const cycles_per_frame = @divTrunc(self.cpu_clock, self.fps);
 
     while (!rl.windowShouldClose()) {
+        self.handleInput();
+
         rl.beginDrawing();
         defer rl.endDrawing();
         rl.clearBackground(BORDER_CLR);
@@ -95,4 +116,10 @@ pub fn run(self: *Game) void {
     }
 
     rl.closeWindow();
+}
+
+pub fn handleInput(self: *Game) void {
+    for (0.., self.key_map) |idx, key| {
+        self.chip8.keypad[idx] = rl.isKeyDown(key);
+    }
 }
