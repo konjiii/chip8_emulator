@@ -6,7 +6,7 @@ const Game = @import("Game.zig");
 pub fn main() !void {
     var chip8 = Chip8.init();
 
-    chip8.loadRom("./test_opcode.ch8") catch |err| {
+    chip8.loadRom("./chip8/roms/games/Tetris [Fran Dachille, 1991].ch8") catch |err| {
         switch (err) {
             error.RomTooBig => std.debug.print("ROM file is too big to fit in memory.\n", .{}),
             else => return err,
