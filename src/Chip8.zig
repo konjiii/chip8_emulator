@@ -2,6 +2,7 @@
 const Chip8 = @This();
 
 const std = @import("std");
+const rl = @import("raylib");
 
 pub const DISPLAY_WIDTH: u8 = 64;
 pub const DISPLAY_HEIGHT: u8 = 32;
@@ -22,7 +23,7 @@ sp: u8 = 0,
 delay_timer: u8 = 0,
 sound_timer: u8 = 0,
 keypad: [16]bool = @splat(false),
-display: [@as(u16, DISPLAY_WIDTH) * DISPLAY_HEIGHT]bool = @splat(false),
+display: [@as(u16, DISPLAY_WIDTH) * DISPLAY_HEIGHT]rl.Color = @splat(rl.Color.black),
 opcode: u16 = 0,
 rand: std.Random = undefined,
 // function pointer table for quick opcode instruction lookup
@@ -178,7 +179,7 @@ fn dispatchF(self: *Chip8) void {
 
 /// 00E0 -> CLS: clear display
 fn OP_00E0(self: *Chip8) void {
-    self.display = @splat(false);
+    self.display = @splat(rl.Color.black);
 }
 
 /// 00EE -> RET: return from subroutine
@@ -352,6 +353,11 @@ fn OP_Cxkk(self: *Chip8) void {
     self.registers[Vx] = self.randByte() & byte;
 }
 
+/// helper function to compare two rl.Color values
+fn colorEqual(a: rl.Color, b: rl.Color) bool {
+    return a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a;
+}
+
 /// Dxyn -> DRW Vx, Vy, nibble
 /// display n-byte sprite from memory location I at (Vx, Vy), set VF = collision
 fn OP_Dxyn(self: *Chip8) void {
@@ -373,14 +379,15 @@ fn OP_Dxyn(self: *Chip8) void {
 
         for (0..width) |col| {
             const sprite_pixel = (sprite_byte & (@as(u8, 0x80) >> @intCast(col))) != 0;
-            const display_pixel = current[col];
+            // check if current[col]
+            const display_pixel = colorEqual(current[col], rl.Color.white);
 
             // if both pixels are on there is a collision
             if (sprite_pixel and display_pixel) {
                 self.registers[0xF] = 1;
             }
             // xor display pixel with sprite pixel
-            current[col] = display_pixel != sprite_pixel;
+            current[col] = if (display_pixel != sprite_pixel) rl.Color.white else rl.Color.black;
         }
     }
 }

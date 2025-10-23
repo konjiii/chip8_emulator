@@ -1,4 +1,5 @@
 const std = @import("std");
+const rl = @import("raylib");
 const Chip8 = @import("Chip8.zig");
 const Game = @import("Game.zig");
 
@@ -13,6 +14,6 @@ pub fn main() !void {
         return;
     };
 
-    var game = Game.init(&chip8);
+    var game = try Game.init(&chip8);
     game.run();
 }
