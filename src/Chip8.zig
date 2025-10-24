@@ -488,7 +488,7 @@ fn OP_Fx55(self: *Chip8) void {
 
     const start = self.index;
     const end = self.index + Vx + 1;
-    std.mem.copyForwards(u8, self.memory[start..end], self.registers[0 .. Vx + 1]);
+    @memcpy(self.memory[start..end], self.registers[0 .. Vx + 1]);
 }
 
 /// Fx65 -> LD Vx, [I]: read registers V0 through Vx from memory starting at
@@ -497,7 +497,7 @@ fn OP_Fx65(self: *Chip8) void {
 
     const start = self.index;
     const end = self.index + Vx + 1;
-    std.mem.copyForwards(u8, self.registers[0 .. Vx + 1], self.memory[start..end]);
+    @memcpy(self.registers[0 .. Vx + 1], self.memory[start..end]);
 }
 
 /// NOP: no operation (used for unknown opcodes)

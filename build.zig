@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // dependencies
+    // ============================================================dependencies
     const raylib_dep = b.dependency("raylib_zig", .{
         .target = target,
         .optimize = optimize,
@@ -26,6 +26,14 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", raylib);
     exe.root_module.addImport("raygui", raygui);
+
+    const nfd = b.dependency("nfdzig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const nfd_module = nfd.module("nfd");
+    exe.root_module.addImport("nfd", nfd_module);
+    // ============================================================
 
     b.installArtifact(exe);
 

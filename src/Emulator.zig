@@ -4,6 +4,7 @@ const Emulator = @This();
 const std = @import("std");
 const rl = @import("raylib");
 const rg = @import("raygui");
+const nfd = @import("nfd");
 const Chip8 = @import("Chip8.zig");
 
 const FOREGROUND_CLR = rl.Color.white;
@@ -17,7 +18,8 @@ const View = enum {
 };
 
 chip8: Chip8,
-curr_rom: []const u8 = "",
+curr_rom: [:0]const u8 = "",
+allocator: std.mem.Allocator,
 virtual_width: i32 = 64 * 20,
 virtual_height: i32 = 32 * 20,
 window_title: [:0]const u8 = "Chip8 Emulator",
@@ -47,17 +49,12 @@ comptime key_map: [16]rl.KeyboardKey = .{
     rl.KeyboardKey.v, // Key F
 },
 
-pub fn init() !Emulator {
-    var chip8 = Chip8.init();
-    chip8.loadRom("./chip8/roms/games/Tetris [Fran Dachille, 1991].ch8") catch |err| {
-        switch (err) {
-            error.RomTooBig => std.debug.print("ROM file is too big to fit in memory.\n", .{}),
-            else => return err,
-        }
-    };
+pub fn init(allocator: std.mem.Allocator) !Emulator {
+    const chip8 = Chip8.init();
 
     var emulator = Emulator{
         .chip8 = chip8,
+        .allocator = allocator,
     };
 
     emulator.cycles_per_frame = @divTrunc(emulator.cpu_clock, emulator.fps);
@@ -65,6 +62,19 @@ pub fn init() !Emulator {
     rl.setConfigFlags(rl.ConfigFlags{ .window_resizable = true });
 
     return emulator;
+}
+
+pub fn deinit(self: *Emulator) void {
+    if (self.curr_rom.len != 0) {
+        self.allocator.free(self.curr_rom);
+    }
+}
+
+/// load rom into chip8 memory
+fn loadRom(self: *Emulator, path: []const u8) !void {
+    try self.chip8.loadRom(path);
+    const file_name = std.fs.path.basename(path);
+    self.curr_rom = try self.allocator.dupeZ(u8, file_name);
 }
 
 /// emulator entry point
@@ -80,6 +90,7 @@ pub fn start(self: *Emulator) !void {
 
     // load the texture from the image
     self.screen_texture = try rl.loadTextureFromImage(image);
+    defer rl.unloadTexture(self.screen_texture);
     rl.unloadImage(image);
 
     while (!rl.windowShouldClose()) {
@@ -99,10 +110,6 @@ pub fn start(self: *Emulator) !void {
 
 /// main menu view
 pub fn main_menu(self: *Emulator) void {
-    rl.beginDrawing();
-    defer rl.endDrawing();
-    rl.clearBackground(BORDER_CLR);
-
     const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
     const screen_height_f: f32 = @floatFromInt(rl.getScreenHeight());
     const virtual_width_f: f32 = @floatFromInt(self.virtual_width);
@@ -116,23 +123,72 @@ pub fn main_menu(self: *Emulator) void {
     const button_width: f32 = 200 * scale;
     const button_height: f32 = 50 * scale;
 
+    rl.beginDrawing();
+    defer rl.endDrawing();
+    rl.clearBackground(BORDER_CLR);
+
     const font_size: i32 = @intFromFloat(20 * scale);
+    // label font size
+    rg.setStyle(rg.Control.default, rg.ControlOrDefaultProperty{ .default = rg.DefaultProperty.text_size }, font_size * 2);
+
+    const title_label_rec = rl.Rectangle{
+        .x = (screen_width_f - button_width * 1.5) / 2,
+        .y = 60 * scale,
+        .width = button_width * 1.5,
+        .height = button_height,
+    };
+
+    _ = rg.label(title_label_rec, "Chip-8 Emulator");
+
+    // button font size
     rg.setStyle(rg.Control.default, rg.ControlOrDefaultProperty{ .default = rg.DefaultProperty.text_size }, font_size);
 
     const start_button_rec = rl.Rectangle{
-        .x = @divTrunc(screen_width_f - button_width, 2),
-        .y = @divTrunc(screen_height_f - button_height, 2) - 30 * scale,
+        .x = (screen_width_f - button_width) / 2,
+        .y = (screen_height_f - button_height) / 2 - 60 * scale,
         .width = button_width,
         .height = button_height,
     };
 
     if (rg.button(start_button_rec, "Start Game")) {
+        if (self.curr_rom.len == 0) {
+            return;
+        }
         self.current_view = View.GAME;
     }
 
+    const select_button_rec = rl.Rectangle{
+        .x = (screen_width_f - button_width) / 2,
+        .y = (screen_height_f - button_height) / 2,
+        .width = button_width,
+        .height = button_height,
+    };
+
+    if (rg.button(select_button_rec, "Select ROM")) {
+        const file_path = nfd.openFileDialog("ch8", ".") catch {
+            return;
+        };
+
+        if (file_path) |path| {
+            self.loadRom(path) catch |err| {
+                std.debug.print("Failed to load ROM: {}\n", .{err});
+                return;
+            };
+        }
+    }
+
+    const curr_rom_label_rec = rl.Rectangle{
+        .x = (screen_width_f) / 2 + button_width / 2 + 10 * scale,
+        .y = (screen_height_f - button_height) / 2,
+        .width = screen_width_f - ((screen_width_f) / 2 + button_width / 2 + 10 * scale),
+        .height = button_height,
+    };
+
+    _ = rg.label(curr_rom_label_rec, if (self.curr_rom.len == 0) "No ROM selected" else self.curr_rom);
+
     const exit_button_rec = rl.Rectangle{
-        .x = @divTrunc(screen_width_f - button_width, 2),
-        .y = @divTrunc(screen_height_f - button_height, 2) + 40 * scale,
+        .x = (screen_width_f - button_width) / 2,
+        .y = (screen_height_f - button_height) / 2 + 60 * scale,
         .width = button_width,
         .height = button_height,
     };
