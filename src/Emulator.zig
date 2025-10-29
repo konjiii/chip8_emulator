@@ -6,6 +6,7 @@ const rl = @import("raylib");
 const rg = @import("raygui");
 const nfd = @import("nfd");
 const Chip8 = @import("Chip8.zig");
+const Audio = @import("Audio.zig");
 
 const FOREGROUND_CLR = rl.Color.white;
 const BACKGROUND_CLR = rl.Color.black;
@@ -29,6 +30,8 @@ screen_texture: rl.Texture = undefined,
 fps: i32 = 60,
 cpu_clock: i32 = 500, // approx
 cycles_per_frame: i32 = undefined,
+audio: Audio = undefined,
+
 // map keyboard keys to Chip8 keys
 comptime key_map: [16]rl.KeyboardKey = .{
     rl.KeyboardKey.x, // Key 0
@@ -84,6 +87,10 @@ pub fn start(self: *Emulator) !void {
     defer rl.closeWindow();
 
     rl.setTargetFPS(self.fps);
+
+    // initialize audio stream
+    self.audio = Audio.init();
+    defer self.audio.deinit();
 
     // create a blank texture for the Chip8 display
     const image = rl.genImageColor(Chip8.DISPLAY_WIDTH, Chip8.DISPLAY_HEIGHT, rl.Color.black);
@@ -200,12 +207,21 @@ pub fn main_menu(self: *Emulator) void {
 
 /// run the main emulation loop
 pub fn emulate(self: *Emulator) void {
+    // -- input handling --
     self.handleInput();
 
+    // -- emulation --
     // cycle cpu multiple times per frame
     self.chip8.cycle(self.cycles_per_frame);
     // update timers at 60Hz
     self.chip8.updateTimers();
+
+    // -- audio --
+    if (self.chip8.sound_timer > 0) {
+        self.audio.play();
+    } else {
+        self.audio.stop();
+    }
 
     const screen_width_f: f32 = @floatFromInt(rl.getScreenWidth());
     const screen_height_f: f32 = @floatFromInt(rl.getScreenHeight());
@@ -235,6 +251,7 @@ pub fn emulate(self: *Emulator) void {
     };
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
+    // -- drawing --
     rl.beginDrawing();
     defer rl.endDrawing();
     rl.clearBackground(BORDER_CLR);
