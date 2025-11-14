@@ -11,6 +11,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .version = .{ .major = 0, .minor = 2, .patch = 1 },
     });
 
     // ============================================================dependencies
